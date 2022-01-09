@@ -1,26 +1,31 @@
 from sklearn.svm import SVC
 from scipy.io import loadmat
 from sklearn.metrics import accuracy_score
+from process_email import *
+
 import matplotlib.pyplot as plt
 import numpy as np
+import codecs
+import get_vocab_dict as getDict
+ASSETS_PATH = './src/assets/'
 
 #------------LOAD-DATA------------#
 def loadData1():
-	data = loadmat('./src/assets/ex6data1.mat')
+	data = loadmat(ASSETS_PATH + 'ex6data1.mat')
 	X = data['X']
 	y = data['y']
 
 	return X, y
 
 def loadData2():
-    data = loadmat('./src/assets/ex6data2.mat')
+    data = loadmat(ASSETS_PATH + 'ex6data2.mat')
     X = data['X']
     y = data['y']
 
     return X, y
     
 def loadData3():
-    data = loadmat('./src/assets/ex6data3.mat')
+    data = loadmat(ASSETS_PATH + 'ex6data3.mat')
     X = data['X']
     y = data['y']
     Xval = data['Xval']
@@ -28,10 +33,37 @@ def loadData3():
 
     return X, y, Xval, yval
 
+def readEmails(path, vocab):
+    email_contents = open(path, 'r', encoding='utf-8', errors='ignore').read()
+    email = email2TokenList(email_contents)
+
+    mailVector = np.zeros([len(vocab)])
+
+    # A partir de cada palabara en el email se busca 
+    # si dicha palabra está contenida en vocab y 
+    # se indica con un 1.0 si es True
+    for word in email:  
+        if word in vocab:
+            i = vocab[word] - 1
+            mailVector[i] = 1
+
+    return mailVector
+
+def loadSpamData(path, row, vocab):
+    spam = np.zeros([row, len(vocab)])
+    for i in range(1, row + 1):
+        textPath = path + str(i).zfill(4) + '.txt'
+        spam[i - 1] = readEmails(textPath, vocab)
+    
+    return spam
+
 #--------------OTROS---------------#
 def selectParameters(X, y, Xval, yval, initialValue, iter):
     bestScore = 0
     bestSvm = 0
+
+    reg = initialValue
+    sigma = initialValue
     
     for i in range(iter):
         reg = initialValue * 3**i
@@ -44,7 +76,7 @@ def selectParameters(X, y, Xval, yval, initialValue, iter):
                 bestSvm = svm
                 bestScore = accuracy
 
-    return bestSvm
+    return bestSvm, reg, sigma, bestScore
 
 #--------------DRAW---------------#
 def drawKernel(X, y, svm, zoom=True):
@@ -101,10 +133,75 @@ def part1():
     svm = selectParameters(X, y, Xval, yval, initialValue, 7)
     drawKernel(X, y, svm)
 
+def part2():
+    numSpam = 500
+    numEasyHam = 2551
+    numHardHam = 250
+    vocab = getDict.getVocabDict()
+
+    print("Leyendo correo...")
+
+    # Lectura de spam
+    path = ASSETS_PATH + 'spam/'
+    spamX = loadSpamData(path, numSpam, vocab)
+    spamY = np.ones([numSpam])
+
+    # Lectura EasyHam
+    path = ASSETS_PATH + 'easy_Ham/'
+    easyHamX = loadSpamData(path, numEasyHam, vocab)
+    easyHamY = np.zeros([numEasyHam])
+
+     # Lectura HardHam
+    path = ASSETS_PATH + 'hard_ham/'
+    hardHamX = loadSpamData(path, numHardHam, vocab)
+    hardHamY = np.zeros([numHardHam])
+
+    print("Fragmentando los datos de entrenamiento, validación y testing...")
+    print(f"Seleccionando el 60% de datos para entrenamiento desde 0 hasta 59...")
+    X = np.vstack((spamX[:int(0.6 * np.shape(spamX)[0])],
+                easyHamX[:int(0.6 * np.shape(easyHamX)[0])],
+                hardHamX[:int(0.6 * np.shape(hardHamX)[0])]))
+    
+    y = np.hstack((spamY[:int(0.6 * np.shape(spamY)[0])],
+                easyHamY[:int(0.6 * np.shape(easyHamY)[0])],
+                hardHamY[:int(0.6 * np.shape(hardHamY)[0])]))
+
+    print(f"Seleccionando el 20% de datos para entrenamiento desde 60 hasta 79...")
+    Xtest = np.vstack((spamX[int(0.6 * np.shape(spamX)[0]):int(0.8 * np.shape(spamX)[0])],
+                    easyHamX[int(0.6 *np.shape(easyHamX)[0]):int(0.8 * np.shape(easyHamX)[0])],
+                    hardHamX[int(0.6 * np.shape(hardHamX)[0]):int(0.8 * np.shape(hardHamX)[0])]))
+    
+    ytest = np.hstack((spamY[int(0.6 * np.shape(spamY)[0]):int(0.8 * np.shape(spamY)[0])],
+                    easyHamY[int(0.6 * np.shape(easyHamY)[0]):int(0.8 * np.shape(easyHamY)[0])],
+                    hardHamY[int(0.6 * np.shape(hardHamY)[0]):int(0.8 * np.shape(hardHamY)[0])]))
+    
+
+    print(f"Seleccionando el 20% de datos para entrenamiento desde 80 hasta 99...")
+    Xval = np.vstack((spamX[int(0.8*np.shape(spamX)[0]):],
+                        easyHamX[int(0.8 * np.shape(easyHamX)[0]):],
+                        hardHamX[int(0.8 * np.shape(hardHamX)[0]):]))
+
+    yval = np.hstack((spamY[int(0.8 * np.shape(spamY)[0]):],
+                        easyHamY[int(0.8 * np.shape(easyHamY)[0]):],
+                        hardHamY[int(0.8 * np.shape(hardHamY)[0]):]))
+
+    print("Entrenando sistema de detección de spam")
+    initialValue = 0.01
+
+    svm, reg, sigma, bestScore = selectParameters(X, y, Xval, yval, initialValue, 8)
+    testScore = svm.score(Xtest, ytest)
+    print(f"Mejor C: {reg}")
+    print(f"Mejor sigma: {sigma}")
+    print(f"Error: {1 - bestScore}")
+    print(f"Precisión: {testScore * 100}%")
+    print("Success")
+
 def main():
     # Parte 1
-    part1()
+    #part1()
 
+    # Parte 2
+    part2()
     return 0
 
 #------------------------------------#
